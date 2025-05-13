@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>贪吃蛇游戏</title>
+    <style>
+        .game-container {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            flex-direction: column;
+        }
+        #gameCanvas {
+            border: 2px solid black;
+            background-color: #f0f0f0;
+        }
+        .controls {
+            margin: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        .score {
+            font-size: 24px;
+            margin-bottom: 10px;
+        }
+        #soundButton {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        #soundButton.muted {
+            background-color: #f44336;
+        }
+        .countdown {
+            position: absolute;
+            font-size: 72px;
+            color: #4CAF50;
+            font-weight: bold;
+            z-index: 100;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.2);
+        }
+        
+        .pause-overlay {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            font-size: 36px;
+            color: #4CAF50;
+            background: rgba(255,255,255,0.9);
+            padding: 20px 40px;
+            border-radius: 10px;
+            display: none;
+            z-index: 1000;
+            box-shadow: 0 0 10px rgba(0,0,0,0.2);
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <div class="score">分数: <span id="score">0</span></div>
+        <canvas id="gameCanvas"></canvas>
+        <div class="controls">
+            <select id="difficulty">
+                <option value="200">简单</option>
+                <option value="150">中等</option>
+                <option value="100">困难</option>
+            </select>
+            <button onclick="startGame()">开始游戏</button>
+            <button id="soundButton">🔊 音效：开</button>
+        </div>
+        <audio id="eatSound" src="sounds/eat.mp3" preload="auto"></audio>
+        <audio id="gameOverSound" src="sounds/game-over.mp3" preload="auto"></audio>
+        <div id="pauseOverlay" class="pause-overlay">游戏暂停</div>
+    </div>
+
+    <script>
+        // 获取画布和上下文
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // 设置画布大小
+        canvas.width = 400;
+        canvas.height = 400;
+
+        // 游戏变量
+        const gridSize = 20;
+        const tileCount = 20;
+        let snake = [
+            {x: 10, y: 10},
+            {x: 9, y: 10},
+            {x: 8, y: 10}
+        ];
+        let dx = 1;
+        let dy = 0;
+        let food = generateFood();
+        let score = 0;
+        let gameRunning = false;
+        let soundEnabled = true;
+        let isPaused = false;
+        let moveTimer = null;
+        let gameSpeed = 150;
+
+        // 加载音效
+        const eatSound = document.getElementById('eatSound');
+        const gameOverSound = document.getElementById('gameOverSound');
+
+        // 加载蛇头图片
+        const snakeHead = new Image();
+        snakeHead.src = 'images/snake-head.png';
+
+        // 音效控制
+        const soundButton = document.getElementById('soundButton');
+        soundButton.addEventListener('click', function() {
+            soundEnabled = !soundEnabled;
+            this.innerHTML = soundEnabled ? '🔊 音效：开' : '🔈 音效：关';
+            this.classList.toggle('muted', !soundEnabled);
+            eatSound.muted = !soundEnabled;
+            gameOverSound.muted = !soundEnabled;
+        });
+
+        // 游戏控制
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape' && gameRunning) {
+                togglePause();
+                return;
+            }
+            
+            if (!gameRunning || isPaused) return;
+            
+            switch(e.key) {
+                case 'ArrowUp': if (dy !== 1) { dx = 0; dy = -1; } break;
+                case 'ArrowDown': if (dy !== -1) { dx = 0; dy = 1; } break;
+                case 'ArrowLeft': if (dx !== 1) { dx = -1; dy = 0; } break;
+                case 'ArrowRight': if (dx !== -1) { dx = 1; dy = 0; } break;
+            }
+        });
+
+        function startGame() {
+            // 清除可能存在的定时器
+            if (moveTimer) {
+                clearTimeout(moveTimer);
+                moveTimer = null;
+            }
+
+            // 重置游戏状态
+            snake = [
+                {x: 10, y: 10},
+                {x: 9, y: 10},
+                {x: 8, y: 10}
+            ];
+            dx = 1;
+            dy = 0;
+            score = 0;
+            isPaused = false;
+            gameRunning = false;  // 先设置为false，等倒计时结束后再设为true
+
+            // 重置显示
+            document.getElementById('score').textContent = '0';
+            document.getElementById('pauseOverlay').style.display = 'none';
+
+            // 开始倒计时
+            const countdownDiv = document.createElement('div');
+            countdownDiv.className = 'countdown';
+            document.querySelector('.game-container').appendChild(countdownDiv);
+
+            let countdown = 3;
+            countdownDiv.textContent = countdown;
+
+            const countdownInterval = setInterval(() => {
+                countdown--;
+                if (countdown > 0) {
+                    countdownDiv.textContent = countdown;
+                } else {
+                    clearInterval(countdownInterval);
+                    countdownDiv.remove();
+                    gameRunning = true;
+                    food = generateFood();
+                    // 开始游戏循环
+                    gameLoop();
+                }
+            }, 1000);
+        }
+
+        function gameLoop() {
+            if (!gameRunning) return;
+            
+            if (!isPaused) {
+                const nextHead = {
+                    x: snake[0].x + dx,
+                    y: snake[0].y + dy
+                };
+
+                // 检查碰撞
+                if (nextHead.x < 0 || nextHead.x >= tileCount || 
+                    nextHead.y < 0 || nextHead.y >= tileCount ||
+                    snake.some(segment => segment.x === nextHead.x && segment.y === nextHead.y)) {
+                    gameOver();
+                    return;
+                }
+
+                // 移动蛇
+                snake.unshift(nextHead);
+
+                // 检查是否吃到食物
+                if (nextHead.x === food.x && nextHead.y === food.y) {
+                    if (soundEnabled) {
+                        eatSound.currentTime = 0;
+                        eatSound.play().catch(e => console.log('音效播放失败'));
+                    }
+                    score += 10;
+                    document.getElementById('score').textContent = score;
+                    food = generateFood();
+                } else {
+                    snake.pop();
+                }
+
+                // 绘制游戏画面
+                clearCanvas();
+                drawFood();
+                drawSnake();
+            }
+
+            // 设置下一帧
+            moveTimer = setTimeout(gameLoop, gameSpeed);
+        }
+
+        function drawSnake() {
+            snake.forEach((segment, index) => {
+                if (index === 0 && snakeHead.complete) {
+                    // 绘制蛇头
+                    ctx.save();
+                    ctx.translate(
+                        segment.x * gridSize + gridSize/2,
+                        segment.y * gridSize + gridSize/2
+                    );
+                    
+                    // 根据移动方向旋转
+                    let angle = 0;
+                    if (dx === 1) angle = 0;
+                    if (dx === -1) angle = Math.PI;
+                    if (dy === -1) angle = -Math.PI/2;
+                    if (dy === 1) angle = Math.PI/2;
+                    
+                    ctx.rotate(angle);
+                    ctx.drawImage(
+                        snakeHead,
+                        -gridSize/2,
+                        -gridSize/2,
+                        gridSize,
+                        gridSize
+                    );
+                    ctx.restore();
+                } else {
+                    // 绘制蛇身
+                    ctx.fillStyle = '#008000';
+                    ctx.fillRect(
+                        segment.x * gridSize,
+                        segment.y * gridSize,
+                        gridSize - 2,
+                        gridSize - 2
+                    );
+                }
+            });
+        }
+
+        function drawFood() {
+            ctx.fillStyle = '#ff0000';
+            ctx.beginPath();
+            ctx.arc(
+                food.x * gridSize + gridSize/2,
+                food.y * gridSize + gridSize/2,
+                gridSize/3,
+                0,
+                Math.PI * 2
+            );
+            ctx.fill();
+        }
+
+        function clearCanvas() {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+        }
+
+        function generateFood() {
+            return {
+                x: Math.floor(Math.random() * tileCount),
+                y: Math.floor(Math.random() * tileCount)
+            };
+        }
+
+        function gameOver() {
+            gameRunning = false;
+            if (moveTimer) {
+                clearTimeout(moveTimer);
+                moveTimer = null;
+            }
+
+            if (soundEnabled) {
+                gameOverSound.currentTime = 0;
+                gameOverSound.play().catch(e => console.log('音效播放失败'));
+            }
+
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.7)';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            
+            ctx.fillStyle = 'white';
+            ctx.font = '48px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('游戏结束', canvas.width/2, canvas.height/2);
+            ctx.font = '24px Arial';
+            ctx.fillText(`得分: ${score}`, canvas.width/2, canvas.height/2 + 40);
+
+            setTimeout(() => {
+                alert(`游戏结束！\n最终得分：${score}`);
+            }, 100);
+        }
+
+        function togglePause() {
+            if (!gameRunning) return;
+            
+            isPaused = !isPaused;
+            const pauseOverlay = document.getElementById('pauseOverlay');
+            pauseOverlay.style.display = isPaused ? 'block' : 'none';
+        }
+    </script>
+</body>
+</html> 
